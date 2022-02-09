@@ -1,0 +1,334 @@
+---
+title: "Hackaton Shenouda Gabriel / Lambert Benjamin / DIA 1"
+author: "Shenouda Gabriel"
+date: "16/12/2020"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+library(MASS)
+library(caTools)
+library(rpart.plot)
+library(rpart)
+library(randomForest)
+library(gbm)
+library(mlbench)
+library(randomForest)
+library(caret)
+
+```
+
+## Setup
+
+We have now imported our libraries, let's import our data :
+We create a dataset with all the training set and a test set.
+
+By understanding the data set we understand that 3 of the variables describe the track: track's name, artist, and the target.
+But track's name and artist don't give any information since we won't be using NLP models or anything like that.
+
+The other 13 columns are the audio features of a track:
+
+    acousticness.
+    danceability.
+    duration_ms.
+    energy.
+    instrumentalness.
+    key.
+    liveness.
+    loudness.
+    mode.
+    speechiness.
+    tempo.
+    time_signature.
+    valence.
+
+
+```{r}
+dataset <- read.csv('data.csv')
+test = read.csv('test.csv')
+
+summary(dataset)
+head(dataset, 5)
+
+
+dataset = dataset[,-c(15,16)]
+summary(dataset)
+head(dataset, 5)
+
+test = test[,-c(14,15)]
+summary(test)
+head(test, 5)
+
+```
+
+## We have a function in order to calculate the accuracy, here it is :
+
+```{r}
+PredAccuracy = function(testVal,predVal){
+  cm=table(testVal,predVal)
+  TN=cm[1,1]
+  FP=cm[1,2]
+  FN=cm[2,1]
+  TP=cm[2,2]
+  Accuracy = (TP+TN)/(TP+FP+FN+TN)
+  return (Accuracy)
+}
+
+```
+## Here is a corelation map in order to better understand our data.
+There is no particular information we can interpret here, and we also conclude a PCA won't improve our models since there is no real correlations spikes or empty areas. 
+
+But we still tried to drop Loudness since it is a bit correlated with some values. The results are in the end, we tried it with a random forest model since it is our best model accuracy.
+
+```{r}
+cormat <- round(cor(dataset),2)
+head(cormat)
+library(reshape2)
+melted_cormat <- melt(cormat)
+head(melted_cormat)
+library(ggplot2)
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()
+```
+## Since our target variable is "0" or "1" we are in the case of a classification problem
+We will perform the state-of-the-art methods in order to find the best accuracy
+Our metric is the accuracy since it is the metric on which we are evaluated.
+## We will also create a train_set and a test_set based on the data set just in case we need it.
+
+```{r}
+split=sample.split(dataset$target, SplitRatio = 0.75)
+train_set=subset(dataset, split==T)
+test_set=subset(dataset, split==F)
+```
+
+## To be clear on the way we proceeded, we tested models either on the full training set called "dataset" and tested it on the same set (which didn't give an absolute value (accuracy) but a relative one compared to the other models) or we used our training_set and test_set. 
+## To give you a cleaner report, we use the training_set and test_set to demonstrate the models, but remember that we apply them in reality on the full dataset when we printed the csv test that we upload on Kaggle.
+## It means we cannot reproduce the accuracy given on Kaggle, but you can by using our models tuned with the full "dataset" variable.
+
+## First model we tried was GBM (Gradient boosting or Stochastic Gradient Boosting)
+1. n.trees – Number of trees (the number of gradient boosting iteration) i.e. N. Increasing N reduces the error on training set, but setting it too high may lead to over-fitting.
+
+2. interaction.depth (Maximum nodes per tree) - number of splits it has to perform on a tree (starting from a single node).
+
+3. Shrinkage (Learning Rate) – It is considered as a learning rate. 
+
+4. n.minobsinnode - the minimum number of observations in trees' terminal nodes. Set n.minobsinnode = 10. When working with small training samples it may be vital to lower this setting to five or even three.
+```{r}
+library(gbm)
+gbmClassifier1 = gbm(target ~ ., data = train_set, distribution = "bernoulli", n.trees = 4500, interaction.depth = 5, shrinkage = 0.1, n.minobsinnode = 2)
+predictBoost1 = predict(gbmClassifier1, newdata = test_set, type='response')
+pred_01=ifelse(predictBoost1>0.5,1,0)
+acc = PredAccuracy(test_set$target, pred_01)
+print(acc)
+
+#gbmClassifier1 = gbm(target ~ ., data = dataset, distribution = "bernoulli", n.trees = 4500, interaction.depth = 5, shrinkage = 0.1, n.minobsinnode = 2)
+#predictBoost1 = predict(gbmClassifier1, newdata = test, type='response')
+#pred_01=ifelse(predictBoost1>0.5,1,0)
+#to_be_submitted = data.frame(id = rownames(test), target = pred_01)
+#write.csv(to_be_submitted , file = "to_be_submitted1.csv", row.names = F)
+
+```
+
+```{r}
+
+gbmClassifier2 = gbm(target ~ ., data = train_set, distribution = "bernoulli", n.trees = 7000, interaction.depth = 10, shrinkage = 0.1, n.minobsinnode = 2)
+predictBoost2 = predict(gbmClassifier2, newdata = test_set)
+pred_02=ifelse(predictBoost2>0.5,1,0)
+acc = PredAccuracy(test_set$target, pred_02)
+print(acc)
+
+
+#gbmClassifier2 = gbm(target ~ ., data = dataset, distribution = "bernoulli", n.trees = 7000, interaction.depth = 10, shrinkage = 0.1, n.minobsinnode = 2)
+#predictBoost2 = predict(gbmClassifier2, newdata = test)
+#pred_02=ifelse(predictBoost2>0.5,1,0)
+#to_be_submitted = data.frame(id = rownames(test), target = predictBoost2)
+#write.csv(to_be_submitted , file = "to_be_submitted2.csv", row.names = F)
+```
+## We will now be using Caret, which allows us to tune the models testing parameters in the range we want. It is very time consuming and i have no time to comput every values we have tested (can take more than 30 min on my computer, so i will just run it with few parametres to show it and show you what parametres i tested but not running them)
+gbmGrid allows us to choose the values or the range of the parametres we want to test the model with
+fitControl contains information about the cross validation and the number of time we run the model
+With the full model and the full parameters it gave us a better accuracy than what it give you now. (no time to cumpute it now)
+Still the actual accuracy printed will be better than the previous GBM models
+```{r}
+fitControl <- trainControl(## 10-fold CV
+  method = "repeatedcv",number = 2, #We normally tested it with 10
+  repeats = 1) # We normally tested it with 3
+
+gbmGrid <-  expand.grid(interaction.depth = c(10,12,16), n.trees = c(7,8)*1000, shrinkage = 0.1, n.minobsinnode = 2)
+# we originally tested it with depth 6, 8, 10, 12, 14, 18, 20 // n.trees : c(4,6)*1000 
+
+nrow(gbmGrid)
+train_set$target = as.factor(train_set$target)
+test_set$target = as.factor(test_set$target)
+gbmClassifier3 <- train(target ~ ., data = train_set, method = "gbm",  trControl = fitControl, verbose = FALSE, 
+                 ## Now specify the exact models to evaluate:
+                 tuneGrid = gbmGrid, metric='Accuracy')
+print(gbmClassifier3)
+ggplot(gbmClassifier3)  
+pred_03 = predict(gbmClassifier3, newdata = test_set)
+er = PredAccuracy(test_set$target, pred_03)
+print(er) 
+
+
+
+#gbmClassifier3 <- train(target ~ ., data = dataset, method = "gbm",  trControl = fitControl, verbose = FALSE, 
+                 ## Now specify the exact models to evaluate:
+#                 tuneGrid = gbmGrid, metric='Accuracy')
+#print(gbmClassifier3)
+#ggplot(gbmClassifier3)  
+#pred_03 = predict(gbmClassifier3, newdata = test)
+#er = PredAccuracy(dataset$target, pred_03)
+#print(er) 
+
+#to_be_submitted = data.frame(id = rownames(test), target = pred_03)
+#write.csv(to_be_submitted , file = "to_be_submitted4.csv", row.names = F)
+```
+## Now the model that gave us 0.80500 accuracy : Random forest. 
+We used caret in order to try the 13 mtry values and find the best parameter
+```{r}
+control <- trainControl(method="repeatedcv", number=2, repeats=1) #Originally used number=10, repeats=3
+
+tunegrid <- expand.grid(.mtry= (1:13)*1)
+
+rf_default <- train(target~., data=train_set, method="rf", tuneGrid=tunegrid, trControl=control, metric = 'Accuracy')
+print(rf_default)
+
+predForest = predict(rf_default, newdata = test_set)
+c = PredAccuracy(test_set$target, predForest)
+print(c) 
+ggplot(rf_default)
+
+#f_default <- train(target~., data=dataset, method="rf", tuneGrid=tunegrid, trControl=control, metric = 'Accuracy')
+#print(rf_default)
+
+#predForest = predict(rf_default, newdata = test)
+#c = PredAccuracy(dataset$target, predForest)
+#print(c) 
+#to_be_submitted = data.frame(id = rownames(test), target = predForest)
+#write.csv(to_be_submitted , file = "to_be_submitted4.csv", row.names = F)
+
+```
+## We also tried tuning manually with the number of trees + mtry, we also obtained 0.80500 with mtry = 4 and ntrees = 2000 with the full dataset on Kaggle (remark that here we also obtain the best accuracy among every model)
+We tried many couple of values and the results were always different, sometimes the first model was the best, sometimes the last one.
+```{r}
+data_forest = randomForest(target ~., data = train_set, mtry = 4, importance = TRUE, ntrees = 2000) 
+
+predForestTEST = predict(data_forest, newdata = test_set)
+c = PredAccuracy(test_set$target, predForestTEST)
+print(c) 
+
+data_forest = randomForest(target ~., data = train_set, mtry = 7, importance = TRUE, ntrees = 2000) 
+
+predForestTEST = predict(data_forest, newdata = test_set)
+c = PredAccuracy(test_set$target, predForestTEST)
+print(c) 
+
+data_forest = randomForest(target ~., data = train_set, mtry = 7, importance = TRUE, ntrees = 4000) 
+
+predForestTEST = predict(data_forest, newdata = test_set)
+c = PredAccuracy(test_set$target, predForestTEST)
+print(c) 
+
+data_forest = randomForest(target ~., data = train_set, mtry = 7, importance = TRUE, ntrees = 6000) 
+
+predForestTEST = predict(data_forest, newdata = test_set)
+c = PredAccuracy(test_set$target, predForestTEST)
+print(c) 
+
+
+
+#data_forest = randomForest(target ~., data = dataset, mtry = 4, importance = TRUE, ntrees = 2000) 
+#predForestTEST = predict(data_forest, newdata = test)
+#to_be_submitted = data.frame(id = rownames(test), target = predForestTEST)
+#write.csv(to_be_submitted , file = "to_be_submitted7777.csv", row.names = F)
+```
+## We also tried a Boosted Logistic Regression w TUNING MODEL but the accuracy was so bad compared to random forest that we didn't try it on Kaggle
+
+tuneLength=20 means that we will try 10 nIter values, where the values are here random because "search = 'random'"
+```{r}
+metric <- "Accuracy"
+control <- trainControl(method="repeatedcv", number=2, repeats=1, search="random") # Originaly number=10, repeats=3
+model_rpart <- train(target ~., data=train_set, method='LogitBoost', metric=metric, tuneLength=10, trControl=control) #We originally triedtuneLength=20
+print(model_rpart)
+predLogitBoost = predict(model_rpart, newdata = test_set)
+acc = PredAccuracy(test_set$target, predLogitBoost)
+print(acc) 
+ggplot(model_rpart)
+
+
+#model_rpart <- train(target ~., data=dataset, method='LogitBoost', metric=metric, tuneLength=10, trControl=control)
+#print(model_rpart)
+#predLogitBoost = predict(model_rpart, newdata = test)
+#to_be_submitted = data.frame(id = rownames(test), target = predLogitBoost)
+#write.csv(to_be_submitted , file = "to_be_submitted5.csv", row.names = F)
+```
+
+## We also tried XGB model, but didn't end up beating random forest accuracy. XGB  stands for eXtreme Gradient Boosting, it has many parameters : 
+
+    nrounds (# Boosting Iterations)
+    max_depth (Max Tree Depth)
+    eta (Shrinkage)
+    gamma (Minimum Loss Reduction)
+    subsample (Subsample Percentage)
+    colsample_bytree (Subsample Ratio of Columns)
+    rate_drop (Fraction of Trees Dropped)
+    skip_drop (Prob. of Skipping Drop-out)
+    min_child_weight (Minimum Sum of Instance Weight)
+    cv (means cross validation)
+```{r}
+fitControl <- trainControl( method = "cv", number = 2)
+xgbGrid <-  expand.grid(nrounds = c(14,16,20,24), max_depth = c(8,10,14,20), eta = 0.1, gamma = 0, colsample_bytree=1, min_child_weight=1, subsample = c(.5,.3,.8,1)) 
+nrow(gbmGrid)
+xgb <- train(target ~ ., data = train_set, method = "xgbTree",  trControl = fitControl, verbose = FALSE, 
+                 ## Now specify the exact models to evaluate:
+                 tuneGrid = xgbGrid, metric='Accuracy')
+print(xgb)
+ggplot(xgb)  
+predxgb = predict(xgb, newdata = test_set)
+er = PredAccuracy(test_set$target, predxgb)
+print(er) 
+
+#xgb <- train(target ~ ., data = dataset, method = "xgbTree",  trControl = fitControl, verbose = FALSE, 
+ #                ## Now specify the exact models to evaluate:
+  #               tuneGrid = xgbGrid, metric='Accuracy')
+#predxgb = predict(xgb, newdata = test)
+#to_be_submitted = data.frame(id = rownames(test), target = predxgb)
+#write.csv(to_be_submitted , file = "to_be_submittedxgb.csv", row.names = F)
+```
+## Here we try to do a random forest model without loudness. We obtained the same results using it on Kaggle (0.80500). The results are still random and when we tried it we had only 2 tries left. We might have had a better result with it, who knows...
+```{r}
+head(train_set[,-c(8)],5)
+head(test_set[,-c(8)],5)
+
+data_forest2 = randomForest(target ~., data = train_set[,-c(8)], mtry = 4, importance = TRUE, ntrees = 2000) 
+
+predForestTEST2 = predict(data_forest2, newdata = test_set[,-c(8)])
+c = PredAccuracy(test_set[,-c(8)]$target, predForestTEST2)
+print(c) 
+
+#data_forest2 = randomForest(target ~., data = dataset[,-c(8)], mtry = 4, importance = TRUE, ntrees = 2000) 
+#predForestTEST2 = predict(data_forest2, newdata = test[,-c(8)])
+#predForestTEST3 = ifelse(predForestTEST2 >=0.5, 1, 0)
+#to_be_submitted = data.frame(id = rownames(test), target = predForestTEST3)
+#write.csv(to_be_submitted , file = "to_be_submitted88888.csv", row.names = F)
+
+
+data_forest2 = randomForest(target ~., data = train_set[,-c(8)], mtry = 4, importance = TRUE, ntrees = 6000) 
+
+predForestTEST2 = predict(data_forest2, newdata = test_set[,-c(8)])
+c = PredAccuracy(test_set[,-c(8)]$target, predForestTEST2)
+print(c) 
+
+data_forest2 = randomForest(target ~., data = train_set[,-c(8)], mtry = 7, importance = TRUE, ntrees = 2000) 
+
+predForestTEST2 = predict(data_forest2, newdata = test_set[,-c(8)])
+c = PredAccuracy(test_set[,-c(8)]$target, predForestTEST2)
+print(c) 
+
+data_forest2 = randomForest(target ~., data = train_set[,-c(8)], mtry = 7, importance = TRUE, ntrees = 6000) 
+
+predForestTEST2 = predict(data_forest2, newdata = test_set[,-c(8)])
+c = PredAccuracy(test_set[,-c(8)]$target, predForestTEST2)
+print(c) 
+```
+
